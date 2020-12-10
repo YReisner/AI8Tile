@@ -70,3 +70,13 @@ class eightTilePuzzle():
 
             return future_states
 
+        def move_state(self,new_state):
+            '''
+            Doesn't return anything, just makes sure we are tracking the progress and changing the current state
+            within the class
+
+            :param new_state: The state chosen as the next one
+
+            '''
+            self.path.append(self.state)
+            self.state = new_state
