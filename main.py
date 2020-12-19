@@ -212,7 +212,7 @@ class SearchTree:
         :return: Either the new node for the search process, or None if the state is a bad candidate (creates a return)
         '''
 
-        state_cost = misplaced_cost(state, puzzle.goal)
+        state_cost = distance_heuristic(state, puzzle.goal)
         potential_node = Node(state, self.current_node, state_cost)
 
         if potential_node.no_return():
@@ -338,6 +338,27 @@ def misplaced_cost(state,goal):
     '''
     return np.sum(~np.equal(state,goal))
 
+def misplaced_cost_Yoav(state,goal):
+    '''
+    A cost heuristic of number of misplaced tiles on the board with Yoav adjustments
+    :param state: the offered new state
+    :param goal: the goal state
+    :return: sum of misplaced tiles
+    '''
+    return np.sum(np.multiply((~np.equal(state,goal)),np.array([[3,3,3],[2,2,2],[1,1,1]])))
+
+def distance_heuristic(state,goal):
+    total_weighted_distance = 0
+    for i in range(0, 3):
+        for j in range(0,3):
+            if state[i,j] != goal[i,j]:
+                cur_row, cur_col = np.where(state == goal[i,j])
+                cur_row, cur_col = cur_row.item(), cur_col.item()
+
+                total_weighted_distance += (abs(cur_row - i) + abs(cur_col - j))/(i+1)
+
+    return total_weighted_distance
+
 
 def random_puzzle():
     '''
@@ -383,13 +404,15 @@ def solve(puzzle,tree,algo):
 
         if win: # Also a fanecy logger, might be removed in the future, but's it's fun.
             print('Cleared the Puzzle on iteration %d' %iterations)
+            print(tree.get_current_node().state)
             algo.save_solution(puzzle.path)
 
     done = True
 
 if __name__ == "__main__":
 
-    np.random.seed(2) # Whatever seed we want for generating puzzles
+
+    np.random.seed(42) # Whatever seed we want for generating puzzles
 
     puzzle = EightTilePuzzle(random_puzzle())
     solvable = puzzle.is_solvable()
