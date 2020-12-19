@@ -203,7 +203,7 @@ class SearchTree:
         self.add_as_parent_child(node)
         self.nodes.append(node)
 
-    def examine_addition_to_search(self,state,puzzle):
+    def examine_addition_to_search(self,state,puzzle,heuristic):
         '''
         We can't simply add a node just because it's a possible move on the board. We need to make sure we don't run
         into infinite loops (see no_return function for Node class)
@@ -212,7 +212,11 @@ class SearchTree:
         :return: Either the new node for the search process, or None if the state is a bad candidate (creates a return)
         '''
 
-        state_cost = distance_heuristic(state, puzzle.goal)
+        if heuristic is True:
+            state_cost = distance_heuristic(state, puzzle.goal)
+        else:
+            state_cost = misplaced_cost_Yoav(state, puzzle.goal)
+
         potential_node = Node(state, self.current_node, state_cost)
 
         if potential_node.no_return():
@@ -221,7 +225,7 @@ class SearchTree:
         else:
             return None
 
-    def try_expand_search(self,puzzle,algo):
+    def try_expand_search(self,puzzle,algo,heuristic):
         '''
         Attempt to proceed to a new child node in the search. At the moment we always choose the child with the least
         cost by some heuristic. If several nodes have the same cost, we will go for the one on the left (also a type of
@@ -239,7 +243,7 @@ class SearchTree:
 
             for i in range(len(children)):
 
-                node = self.examine_addition_to_search(children[i], puzzle)
+                node = self.examine_addition_to_search(children[i], puzzle,heuristic)
                 if node is not None:
                     open_list.append(node)
                     cost_list.append(node.get_cost())
@@ -355,7 +359,7 @@ def distance_heuristic(state,goal):
                 cur_row, cur_col = np.where(state == goal[i,j])
                 cur_row, cur_col = cur_row.item(), cur_col.item()
 
-                total_weighted_distance += (abs(cur_row - i) + abs(cur_col - j))/(i+1)
+                total_weighted_distance += (abs(cur_row - i) + abs(cur_col - j))
 
     return total_weighted_distance
 
@@ -366,7 +370,7 @@ def random_puzzle():
     '''
     return np.random.choice([0,1,2,3,4,5,6,7,8],9,replace=False).reshape((3,3))
 
-def solve(puzzle,tree,algo):
+def solve(puzzle,tree,algo,heuristic):
     iterations = 0  # Tracking how many times we expanded to a child node
     win = puzzle.is_win()  # Making sure we are not in the goal state
     if win:
@@ -378,7 +382,7 @@ def solve(puzzle,tree,algo):
     print("initial state is")
     print(tree.get_current_node().state)
     while not win:  # Search until you win
-        new_node = tree.try_expand_search(puzzle, algo)  # Depth first - do we have a child to expand to?
+        new_node = tree.try_expand_search(puzzle, algo,heuristic)  # Depth first - do we have a child to expand to?
 
 
         if new_node is not None:
@@ -408,11 +412,12 @@ def solve(puzzle,tree,algo):
             algo.save_solution(puzzle.path)
 
     done = True
+    return algo.optimal_path
 
 if __name__ == "__main__":
 
 
-    np.random.seed(42) # Whatever seed we want for generating puzzles
+    np.random.seed(2) # Whatever seed we want for generating puzzles
 
     puzzle = EightTilePuzzle(random_puzzle())
     solvable = puzzle.is_solvable()
@@ -422,6 +427,14 @@ if __name__ == "__main__":
 
     tree = SearchTree(puzzle.state)
     algo = BnB()
-    solve(puzzle,tree,algo)
+    distance_heuristic = True
+    path = solve(puzzle,tree,algo,distance_heuristic)
+    print("optimal solution is")
+    for i in range(len(path)):
+        print(path[i])
+        if i < len(path) -1:
+            print("    |")
+            print("    |")
+            print("   \\\'/")
 
 
