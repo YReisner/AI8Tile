@@ -18,12 +18,11 @@ class EightTilePuzzle:
         '''
         inv_count = 0
 
-        for i in range(0,3):
-            pos = i+1
-            for j in range(pos,3):
-                if(self.state[j,i] > 0 and self.state[j,i] > self.state[i,j]):
-                    inv_count += 1
-            return inv_count % 2 == 0
+        flat = self.state.reshape(9)
+        for i in range(9):
+            if flat[i] != 0:
+                inv_count += sum(flat[i:]>flat[i])
+        return inv_count % 2 == 0
 
     def is_win(self):
         '''
@@ -116,7 +115,8 @@ class Node:
         self.state = state
         self.parent = parent
         self.children = []
-        self.cost = cost
+        self.g = cost
+        self.h = cost
         self.alive = True
 
     def is_root(self):
@@ -132,13 +132,27 @@ class Node:
         self.alive = False
 
     def get_cost(self):
-        return self.cost
+        return self.h+self.g
+
+    def get_g(self):
+        return self.g
+
+    def get_h(self):
+        return self.h
 
     def get_parent(self):
         return self.parent
 
     def get_children(self):
         return self.children
+
+    def calculate_g(self):
+        g = 0
+        node = self
+        while node.get_parent() is not None:
+            node = node.get_parent()
+            g += 1
+        return g
 
     def no_return(self):
         '''
@@ -169,6 +183,7 @@ class SearchTree:
     def __init__(self, root):
         self.nodes = [Node(root)]
         self.current_node = Node(root)
+        self.open_nodes = {}
 
 
     def __len__(self):
@@ -203,100 +218,8 @@ class SearchTree:
         self.add_as_parent_child(node)
         self.nodes.append(node)
 
-    def examine_addition_to_search(self,state,puzzle,heuristic):
-        '''
-        We can't simply add a node just because it's a possible move on the board. We need to make sure we don't run
-        into infinite loops (see no_return function for Node class)
-        :param state: The new state which is a candidate for a new node
-        :param puzzle: the board configuration class
-        :return: Either the new node for the search process, or None if the state is a bad candidate (creates a return)
-        '''
-
-        if heuristic is True:
-            state_cost = distance_heuristic(state, puzzle.goal)
-        else:
-            state_cost = misplaced_cost_Yoav(state, puzzle.goal)
-
-        potential_node = Node(state, self.current_node, state_cost)
-
-        if potential_node.no_return():
-            self.add_node(potential_node)
-            return potential_node
-        else:
-            return None
-
-    def try_expand_search(self,puzzle,algo,heuristic):
-        '''
-        Attempt to proceed to a new child node in the search. At the moment we always choose the child with the least
-        cost by some heuristic. If several nodes have the same cost, we will go for the one on the left (also a type of
-        heuristic I guess, but that's how numpy.argmin works, so I just left it this way)
-        :param puzzle: the board class for current configuration and new state candidates
-        :param algo: the algorithm used
-        :return: Either the chosen node for the next search expansion, or None if no children are an option (all dead
-        nodes, or ones that create a return)
-        '''
-
-        open_list = []
-        cost_list = []
-        if len(self.get_current_node().get_children()) == 0:
-            children = puzzle.create_possible_future_states()
-
-            for i in range(len(children)):
-
-                node = self.examine_addition_to_search(children[i], puzzle,heuristic)
-                if node is not None:
-                    open_list.append(node)
-                    cost_list.append(node.get_cost())
-
-            if len(open_list) > 0:
-                best_node_index = np.argmin(cost_list)
-
-                self.change_search_node(open_list[best_node_index])
-
-                algo.increase_LB(self.get_current_node().get_cost()+1)
-                puzzle.move_state(self.get_current_node().state)
-
-                return self.get_current_node()
-
-        else:
-            children = self.get_current_node().get_children()
-            for i in range(len(children)):
-                child = children[i]
-                if child.is_alive():
-                    open_list.append(child)
-                    cost_list.append(child.get_cost())
-
-            if len(open_list) > 0:
-                best_node_index = np.argmin(cost_list)
-
-                self.change_search_node(open_list[best_node_index])
-
-                algo.increase_LB(self.get_current_node().get_cost() + 1)
-                puzzle.move_state(self.get_current_node().state)
-
-                return self.get_current_node()
-            else:
-                return None
-
-    def back_track(self,puzzle,algo):
-        '''
-        Goes backwards one Node in the search tree, also reduces the cost of the current node for the algorithm, and
-        removes the last action from the puzzle ("sorry, I'm actually not going to do that move!" sort of thing)
-        :param puzzle: puzzle class
-        :param algo: algorithm class
-        :return: the new node for the search, which is actually always the parent node, unless it's the root, then None.
-        '''
-        if self.get_current_node().get_parent() is None:
-            return None
-        else:
-            old_node = self.get_current_node()
-            algo.decrease_LB(old_node.get_cost())
-            old_node.kill_node()
-            self.change_search_node(old_node.get_parent())
-            puzzle.state = self.get_current_node().state
-            puzzle.get_path().pop(-1)
-
-            return self.get_current_node()
+    def get_open_nodes(self):
+        return self.open_nodes
 
 
 
@@ -305,7 +228,7 @@ class SearchTree:
         '''
         Just a way to represent the tree. Not a very good one, once it's large :-)
         '''
-        return f"NonBinTree({self.val}, parent is {self.parent}): {self.nodes}"
+        return f"SearchTree(current state is {self.current_node.state}, number of open nodes is {len(self.open_nodes)})"
 
 
 
@@ -318,20 +241,239 @@ class BnB:
         self.LB = 0
         self.optimal_path = []
 
-    def increase_LB(self,cost):
-        self.LB += cost
+    def increase_LB(self):
+        self.LB += 1
 
-    def decrease_LB(self,cost):
-        self.LB -= cost
+    def decrease_LB(self):
+        self.LB -= 1
 
     def reset_LB(self):
         self.LB = 0
 
     def save_solution(self,path):
         self.UB = self.LB
-        self.reset_LB()
-        self.optimal_path = path
+        self.optimal_path = path.copy()
 
+    def examine_addition_to_search(self,tree,state,puzzle,heuristic):
+        '''
+        We can't simply add a node just because it's a possible move on the board. We need to make sure we don't run
+        into infinite loops (see no_return function for Node class)
+        :param state: The new state which is a candidate for a new node
+        :param puzzle: the board configuration class
+        :return: Either the new node for the search process, or None if the state is a bad candidate (creates a return)
+        '''
+
+        if heuristic:
+            state_cost = distance_heuristic(state, puzzle.goal)
+        else:
+            state_cost = misplaced_cost_Yoav(state, puzzle.goal)
+
+        potential_node = Node(state, tree.current_node, state_cost)
+
+        if potential_node.no_return():
+            tree.add_node(potential_node)
+            return potential_node
+        else:
+            return None
+
+    def try_expand_search(self,puzzle,tree,heuristic):
+        '''
+        Attempt to proceed to a new child node in the search. At the moment we always choose the child with the least
+        cost by some heuristic. If several nodes have the same cost, we will go for the one on the left (also a type of
+        heuristic I guess, but that's how numpy.argmin works, so I just left it this way)
+        :param puzzle: the board class for current configuration and new state candidates
+        :param algo: the algorithm used
+        :return: Either the chosen node for the next search expansion, or None if no children are an option (all dead
+        nodes, or ones that create a return)
+        '''
+
+        open_list = []
+        cost_list = []
+        if len(tree.get_current_node().get_children()) == 0:
+            children = puzzle.create_possible_future_states()
+
+            for i in range(len(children)):
+
+                node = self.examine_addition_to_search(tree, children[i], puzzle,heuristic)
+                if node is not None:
+                    open_list.append(node)
+                    cost_list.append(node.get_h())
+
+            if len(open_list) > 0:
+                best_node_index = np.argmin(cost_list)
+
+                tree.change_search_node(open_list[best_node_index])
+
+                self.increase_LB()
+                puzzle.move_state(tree.get_current_node().state)
+
+                return tree.get_current_node()
+
+        else:
+            children = tree.get_current_node().get_children()
+            for i in range(len(children)):
+                child = children[i]
+                if child.is_alive():
+                    open_list.append(child)
+                    cost_list.append(child.get_cost())
+
+            if len(open_list) > 0:
+                best_node_index = np.argmin(cost_list)
+
+                tree.change_search_node(open_list[best_node_index])
+
+                self.increase_LB()
+                puzzle.move_state(tree.get_current_node().state)
+
+                return tree.get_current_node()
+            else:
+                return None
+
+    def back_track(self,puzzle,tree):
+        '''
+        Goes backwards one Node in the search tree, also reduces the cost of the current node for the algorithm, and
+        removes the last action from the puzzle ("sorry, I'm actually not going to do that move!" sort of thing)
+        :param puzzle: puzzle class
+        :param algo: algorithm class
+        :return: the new node for the search, which is actually always the parent node, unless it's the root, then None.
+        '''
+        if tree.get_current_node().get_parent() is None:
+            return None
+        else:
+            old_node = tree.get_current_node()
+            self.decrease_LB()
+            old_node.kill_node()
+            tree.change_search_node(old_node.get_parent())
+            puzzle.state = tree.get_current_node().state
+            puzzle.get_path().pop(-1)
+
+
+            return tree.get_current_node()
+
+    def solve(self, puzzle,  heuristic):
+        tree = SearchTree(puzzle.state)
+        iterations = 0  # Tracking how many times we expanded to a child node
+        win = puzzle.is_win()  # Making sure we are not in the goal state
+        if win:
+            print('Cleared the Puzzle in %d iterations' % iterations)
+            self.save_solution(puzzle.path)
+
+        done = False
+
+        print("initial state is")
+        print(tree.get_current_node().state)
+        while not done:
+            win = False
+            while not win:  # Search until you win
+                iterations += 1
+                if self.LB+1 < self.UB:
+                    new_node = self.try_expand_search(puzzle, tree, heuristic)  # Depth first - do we have a child to expand to?
+
+                    if new_node is not None:
+
+                        # We can expand to a child node!
+                        win = puzzle.is_win()  # Did we win?
+                    else:
+                        new_node = self.back_track(puzzle, tree)
+
+                        if new_node is None:
+                            # This means we are at the root node, and the algorithm should finish (not truly implemented yet)
+                            done = True
+                            break
+
+                else:
+                    # We can't expand, then we should go back up the tree
+                    new_node = self.back_track(puzzle, tree)
+
+                    if new_node is None:
+                        # This means we are at the root node, and the algorithm should finish (not truly implemented yet)
+                        done = True
+                        break
+
+                if iterations % 10000 == 0:  # Just a logger for sanity check, should be removed when we are happy
+                    print("at iteration %d number of moves is %d" % (iterations, self.LB))
+                    print(tree.get_current_node().state)
+
+                if win:  # Also a fancy logger, might be removed in the future, but's it's fun.
+                    print('Cleared the Puzzle on iteration %d in %d moves' % (iterations,self.LB))
+                    print(tree.get_current_node().state)
+                    self.save_solution(puzzle.path)
+
+
+
+        return self.optimal_path, iterations
+
+def trace_path(node):
+    '''
+    Traces the path from the best node backwards
+    :param node: the optimal node (represents the goal state and how we got to it)
+    :return: moves taken to get to the node, and the entire path
+    '''
+    path = [node.state]
+    while node.get_parent() is not None:
+        node = node.get_parent()
+        path.insert(0,node.state)
+    return len(path)-1,path
+
+def a_star(puzzle,heuristic):
+    '''
+    Solves the 8 tile problem with A* algorithm
+    :param puzzle: the board
+    :param heuristic: Boolean. Heuristic used, at the moment it's either distance (True) or misplaced tiles (False)
+    :return: the optimal path to solution, and number of iterations. We also return the number of moves, but that can
+    also be easily computer by len(optimal_path)-1
+    '''
+    tree = SearchTree(puzzle.state) # start a search tree
+    iterations = 0
+    index = 0  # Index to keep track of tree nodes :-)
+    children = puzzle.create_possible_future_states() # Let's add some nodes
+    for i in range(len(children)):
+        child = children[i]
+        node = Node(child,tree.get_current_node())
+        if heuristic: # True means use distance heuristic
+            node.h = distance_heuristic(child,puzzle.goal)
+        else:
+            node.h = misplaced_cost(child,puzzle.goal)
+        node.g = node.calculate_g() # Essentially the number of moves needed to get to state from initial state
+
+        tree.add_node(node) # add to search tree
+        index +=1 # Change index for open nodes dict
+        tree.get_open_nodes()[index] = (node.get_cost(),node) # save cost-node tuple for easy search-space
+
+    while not puzzle.is_win():
+        if iterations % 1000 == 0:  # Just a logger for sanity check, should be removed when we are happy
+            print("at iteration %d number of moves is %d" % (iterations, tree.get_current_node().g))
+            print(tree.get_current_node().state)
+        iterations += 1
+        min_cost = np.inf
+        min_node = None
+        min_key = None
+        open_nodes = tree.get_open_nodes()
+        for key in open_nodes.keys(): # Which of the open nodes is the best option to expand to?
+            if open_nodes[key][0] < min_cost:
+                min_cost = open_nodes[key][0]
+                min_node = open_nodes[key][1]
+                min_key = key
+        tree.change_search_node(min_node)
+        puzzle.move_state(min_node.state)
+        del open_nodes[min_key] # If I moved to a node, I remove it from the open node list
+
+        children = puzzle.create_possible_future_states()
+        for i in range(len(children)):
+            child = children[i]
+            node = Node(child, tree.get_current_node())
+            if node.no_return():
+                if heuristic:
+                    node.h = distance_heuristic(child, puzzle.goal)
+                else:
+                    node.h = misplaced_cost(child, puzzle.goal)
+                node.g = node.calculate_g()
+
+                tree.add_node(node)
+                index += 1
+                tree.get_open_nodes()[index] = (node.get_cost(), node)
+    moves, path = trace_path(tree.get_current_node())
+    return iterations, path, moves
 
 def misplaced_cost(state,goal):
     '''
@@ -352,16 +494,16 @@ def misplaced_cost_Yoav(state,goal):
     return np.sum(np.multiply((~np.equal(state,goal)),np.array([[3,3,3],[2,2,2],[1,1,1]])))
 
 def distance_heuristic(state,goal):
-    total_weighted_distance = 0
+    total_distance = 0
     for i in range(0, 3):
         for j in range(0,3):
             if state[i,j] != goal[i,j]:
                 cur_row, cur_col = np.where(state == goal[i,j])
                 cur_row, cur_col = cur_row.item(), cur_col.item()
 
-                total_weighted_distance += (abs(cur_row - i) + abs(cur_col - j))
+                total_distance += (abs(cur_row - i) + abs(cur_col - j))
 
-    return total_weighted_distance
+    return total_distance
 
 
 def random_puzzle():
@@ -370,65 +512,27 @@ def random_puzzle():
     '''
     return np.random.choice([0,1,2,3,4,5,6,7,8],9,replace=False).reshape((3,3))
 
-def solve(puzzle,tree,algo,heuristic):
-    iterations = 0  # Tracking how many times we expanded to a child node
-    win = puzzle.is_win()  # Making sure we are not in the goal state
-    if win:
-        print('Cleared the Puzzle on iteration %d' % iterations)
-        algo.save_solution(puzzle.path)
-    done = False  # Not really used yet. In the future, we should not stop when we find the first solution, only after
-    #  we made sure there is no other solution that is more optimal. We don't dop that yet.
 
-    print("initial state is")
-    print(tree.get_current_node().state)
-    while not win:  # Search until you win
-        new_node = tree.try_expand_search(puzzle, algo,heuristic)  # Depth first - do we have a child to expand to?
-
-
-        if new_node is not None:
-
-            # We can expand to a child node!
-            iterations += 1
-            win = puzzle.is_win() # Did we win?
-
-
-
-
-        else:
-            # We can't expand, then we should go back up the tree
-            new_node = tree.back_track(puzzle, algo)
-
-            if new_node is None:
-                # This means we are at the root node, and the algorithm should finish (not truly implemented yet)
-                done = True
-
-        if iterations %1000 == 0:  # Just a logger for sanity check, should be removed when we are happy
-            print("at iteration %d cost is %d" %(iterations, algo.LB))
-            print(tree.get_current_node().state)
-
-        if win: # Also a fanecy logger, might be removed in the future, but's it's fun.
-            print('Cleared the Puzzle on iteration %d' %iterations)
-            print(tree.get_current_node().state)
-            algo.save_solution(puzzle.path)
-
-    done = True
-    return algo.optimal_path
 
 if __name__ == "__main__":
 
 
-    np.random.seed(2) # Whatever seed we want for generating puzzles
+    np.random.seed(5) # Whatever seed we want for generating puzzles
 
     puzzle = EightTilePuzzle(random_puzzle())
     solvable = puzzle.is_solvable()
+    print(solvable)
+
     while not solvable:
         puzzle = EightTilePuzzle(random_puzzle())
         solvable = puzzle.is_solvable()
 
-    tree = SearchTree(puzzle.state)
+    use_distance_heuristic = True
+
     algo = BnB()
-    distance_heuristic = True
-    path = solve(puzzle,tree,algo,distance_heuristic)
+    path,iterations = algo.solve(puzzle,use_distance_heuristic)
+    moves = len(path)-1
+    #iterations, path, moves = a_star(puzzle,use_distance_heuristic)
     print("optimal solution is")
     for i in range(len(path)):
         print(path[i])
@@ -436,5 +540,6 @@ if __name__ == "__main__":
             print("    |")
             print("    |")
             print("   \\\'/")
+    print('Solution took %d iterations and %d moves' %(iterations,moves))
 
 
