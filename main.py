@@ -1,6 +1,6 @@
 
 import numpy as np
-
+import matplotlib.pyplot as plt
 
 class EightTilePuzzle:
     '''
@@ -127,7 +127,7 @@ class Node:
 
     def kill_node(self):
         '''
-        Makes sure we never expand to this node again
+        Makes sure we never expand to this node again relevant for B&B algorithm
         '''
         self.alive = False
 
@@ -147,6 +147,11 @@ class Node:
         return self.children
 
     def calculate_g(self):
+        '''
+        g is simply the number of steps it takes to get to this Node, so we simply count the number of parents until
+        the root node. Not very efficient, but works :-)
+        :return: number of steps to Node
+        '''
         g = 0
         node = self
         while node.get_parent() is not None:
@@ -157,7 +162,7 @@ class Node:
     def no_return(self):
         '''
         The idea here is that we should never return to the exact state of one of our ancestors. If we want to do that,
-        it is better to simply go back to that ancestor and do a different choice, as we prefer less actions. Also,
+        it is better to simply go back to that ancestor and make a different choice, as we prefer less actions. Also,
         allowing this can easily lead to endless loops
 
         :return: boolean, if one of the node's ancestors are also in this state
@@ -237,7 +242,7 @@ class BnB:
     Algorithm class, not sure about this one yet. Might change drastically.
     '''
     def __init__(self):
-        self.UB = np.inf
+        self.UB = 100
         self.LB = 0
         self.optimal_path = []
 
@@ -266,7 +271,7 @@ class BnB:
         if heuristic:
             state_cost = distance_heuristic(state, puzzle.goal)
         else:
-            state_cost = misplaced_cost_Yoav(state, puzzle.goal)
+            state_cost = misplaced_cost(state, puzzle.goal)
 
         potential_node = Node(state, tree.current_node, state_cost)
 
@@ -351,25 +356,30 @@ class BnB:
             return tree.get_current_node()
 
     def solve(self, puzzle,  heuristic):
+        win_iterations = []  # for graphing purposes
+        win_moves = []  # for graphing purposes
         tree = SearchTree(puzzle.state)
         iterations = 0  # Tracking how many times we expanded to a child node
         win = puzzle.is_win()  # Making sure we are not in the goal state
+        done = False
         if win:
             print('Cleared the Puzzle in %d iterations' % iterations)
             self.save_solution(puzzle.path)
+            done = True  # If the initial node is the goal, obviously it is also the optimal solution
 
-        done = False
+
 
         print("initial state is")
         print(tree.get_current_node().state)
         while not done:
             win = False
             while not win:  # Search until you win
-                iterations += 1
+
                 if self.LB+1 < self.UB:
                     new_node = self.try_expand_search(puzzle, tree, heuristic)  # Depth first - do we have a child to expand to?
 
                     if new_node is not None:
+                        iterations += 1
 
                         # We can expand to a child node!
                         win = puzzle.is_win()  # Did we win?
@@ -398,10 +408,12 @@ class BnB:
                     print('Cleared the Puzzle on iteration %d in %d moves' % (iterations,self.LB))
                     print(tree.get_current_node().state)
                     self.save_solution(puzzle.path)
+                    win_iterations.append(iterations)
+                    win_moves.append(len(puzzle.path)-1)
 
 
 
-        return self.optimal_path, iterations
+        return self.optimal_path, iterations, win_iterations, win_moves
 
 def trace_path(node):
     '''
@@ -425,6 +437,8 @@ def a_star(puzzle,heuristic):
     '''
     tree = SearchTree(puzzle.state) # start a search tree
     iterations = 0
+    state_iterations = []
+    state_moves = []
     index = 0  # Index to keep track of tree nodes :-)
     children = puzzle.create_possible_future_states() # Let's add some nodes
     for i in range(len(children)):
@@ -437,7 +451,7 @@ def a_star(puzzle,heuristic):
         node.g = node.calculate_g() # Essentially the number of moves needed to get to state from initial state
 
         tree.add_node(node) # add to search tree
-        index +=1 # Change index for open nodes dict
+        index +=1  # Change index for open nodes dict
         tree.get_open_nodes()[index] = (node.get_cost(),node) # save cost-node tuple for easy search-space
 
     while not puzzle.is_win():
@@ -450,6 +464,8 @@ def a_star(puzzle,heuristic):
         min_key = None
         open_nodes = tree.get_open_nodes()
         for key in open_nodes.keys(): # Which of the open nodes is the best option to expand to?
+            # This could have been done much more efficiently with a different data-structure, but as long as the
+            # problem isn't too large, it works fine.
             if open_nodes[key][0] < min_cost:
                 min_cost = open_nodes[key][0]
                 min_node = open_nodes[key][1]
@@ -457,6 +473,9 @@ def a_star(puzzle,heuristic):
         tree.change_search_node(min_node)
         puzzle.move_state(min_node.state)
         del open_nodes[min_key] # If I moved to a node, I remove it from the open node list
+        if iterations % 10 == 0:
+            state_iterations.append(iterations)
+            state_moves.append(min_node.g)
 
         children = puzzle.create_possible_future_states()
         for i in range(len(children)):
@@ -472,8 +491,11 @@ def a_star(puzzle,heuristic):
                 tree.add_node(node)
                 index += 1
                 tree.get_open_nodes()[index] = (node.get_cost(), node)
+
     moves, path = trace_path(tree.get_current_node())
-    return iterations, path, moves
+    state_iterations.append(iterations)
+    state_moves.append(tree.get_current_node().g)
+    return iterations, path, moves, state_iterations, state_moves
 
 def misplaced_cost(state,goal):
     '''
@@ -486,14 +508,25 @@ def misplaced_cost(state,goal):
 
 def misplaced_cost_Yoav(state,goal):
     '''
-    A cost heuristic of number of misplaced tiles on the board with Yoav adjustments
+    A cost heuristic of number of misplaced tiles on the board with Yoav adjustments. It speeds up the solution a little
+    bit by giving an importance hierarchy to the rows. Not really significant though, and the amount of importance is
+    arbitrary, a type of hyper-parameter.
     :param state: the offered new state
     :param goal: the goal state
     :return: sum of misplaced tiles
     '''
-    return np.sum(np.multiply((~np.equal(state,goal)),np.array([[3,3,3],[2,2,2],[1,1,1]])))
+    return np.sum(np.multiply((~np.equal(state,goal)),np.array([[1,1,1],[0.7,0.7,0.7],[0.5,0.5,0.5]])))
 
 def distance_heuristic(state,goal):
+    '''
+    Calculates a Manhattan distance heuristic. The sum of number of "free" moves you need to move each tile to his
+    right spot. This means we are not only penalizing for a misplaced tile, we penalize more if the tile is far away
+    from his correct spot. This heuristic is admissible because we cannot actually make "free" moves, which means the
+    road to victory will always require more moves.
+    :param state: the current state
+    :param goal: the goal state
+    :return: Int, the sum of tile distances from their goal location
+    '''
     total_distance = 0
     for i in range(0, 3):
         for j in range(0,3):
@@ -517,22 +550,44 @@ def random_puzzle():
 if __name__ == "__main__":
 
 
-    np.random.seed(5) # Whatever seed we want for generating puzzles
+    np.random.seed(2) # Whatever seed we want for generating puzzles
 
-    puzzle = EightTilePuzzle(random_puzzle())
-    solvable = puzzle.is_solvable()
-    print(solvable)
+    puzzle = EightTilePuzzle(random_puzzle()) # Generate puzzle
+    solvable = puzzle.is_solvable() # Is the puzzle solvable?
 
     while not solvable:
         puzzle = EightTilePuzzle(random_puzzle())
         solvable = puzzle.is_solvable()
 
+    algorithm = 'A' # Choosing the algorithm to run. A for A*, B for B&B
+
     use_distance_heuristic = True
 
-    algo = BnB()
-    path,iterations = algo.solve(puzzle,use_distance_heuristic)
-    moves = len(path)-1
-    #iterations, path, moves = a_star(puzzle,use_distance_heuristic)
+    if algorithm == 'A':
+        for h in (True,False): # For loop was created for graph comparing heuristics within A*
+            use_distance_heuristic = h
+            if h:
+                iterations, path, moves, state_iterations_h, state_moves_h = a_star(puzzle, use_distance_heuristic)
+            else:
+                puzzle = EightTilePuzzle(path[0])
+                iterations, path, moves, state_iterations_m, state_moves_m = a_star(puzzle, use_distance_heuristic)
+        plt.plot(state_iterations_h, state_moves_h,label='Distance Heuristic',color='blue')
+        plt.plot(state_iterations_m, state_moves_m, label='Misplaced Heuristic', color='green')
+        plt.legend()
+        plt.title("A* solution graph")
+        plt.xlabel('Number of expansions')
+        plt.ylabel('Number of moves for victory')
+        plt.show()
+    else:
+        algo = BnB()
+        path,iterations, win_iterations,win_moves = algo.solve(puzzle,use_distance_heuristic)
+        moves = len(path)-1
+        plt.plot(win_iterations, win_moves)
+        plt.title("Branch & Bound solution graph")
+        plt.xlabel('Number of expansions')
+        plt.ylabel('Number of moves for victory')
+        plt.show()
+
     print("optimal solution is")
     for i in range(len(path)):
         print(path[i])
